@@ -1,0 +1,20 @@
+# AutoSage — backend dependencies
+# Python 3.10+
+
+# Web API
+fastapi>=0.110
+uvicorn[standard]>=0.27
+pydantic>=2.6
+
+# RAG stack
+chromadb>=0.5.0                 # local vector database
+sentence-transformers>=2.7.0    # all-MiniLM-L6-v2 embedding model
+google-genai>=0.3.0             # Gemini client (chat + Hebrew->English translation)
+
+# Ingestion / scraping
+requests>=2.31
+trafilatura>=1.9                # robust main-article extraction
+beautifulsoup4>=4.12            # fallback extractor
+
+# Config
+python-dotenv>=1.0

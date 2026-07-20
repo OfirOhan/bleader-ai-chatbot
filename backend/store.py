@@ -39,25 +39,42 @@ def add(ids, documents, embeddings, metadatas) -> None:
     )
 
 
+def _hit(id_: str, doc: str, meta: dict, score: float) -> dict:
+    return {
+        "id": id_,
+        "text": doc,                          # original Hebrew — used for grounding
+        "text_en": meta.get("text_en", ""),   # English — used for BM25 / reranking
+        "car": meta.get("car", "?"),
+        "url": meta.get("url", ""),
+        "score": round(float(score), 4),
+    }
+
+
 def search(query_embedding: list[float], k: int) -> list[dict]:
-    """Return the top-k chunks as flat dicts: text, car, url, score."""
+    """Return the top-k nearest chunks by vector similarity (score = cosine sim)."""
     res = collection().query(
         query_embeddings=[query_embedding],
         n_results=k,
         include=["documents", "metadatas", "distances"],
     )
+    ids = res.get("ids", [[]])[0]
     docs = res.get("documents", [[]])[0]
     metas = res.get("metadatas", [[]])[0]
     dists = res.get("distances", [[]])[0]
-    hits = []
-    for doc, meta, dist in zip(docs, metas, dists):
-        hits.append({
-            "text": doc,
-            "car": meta.get("car", "?"),
-            "url": meta.get("url", ""),
-            "score": round(1.0 - float(dist), 4),  # cosine distance -> similarity
-        })
-    return hits
+    # cosine distance -> similarity
+    return [
+        _hit(i, doc, meta, 1.0 - float(dist))
+        for i, doc, meta, dist in zip(ids, docs, metas, dists)
+    ]
+
+
+def all_chunks() -> list[dict]:
+    """Every stored chunk (no score) — used to build the lexical index."""
+    res = collection().get(include=["documents", "metadatas"])
+    ids = res.get("ids", [])
+    docs = res.get("documents", [])
+    metas = res.get("metadatas", [])
+    return [_hit(i, doc, meta, 0.0) for i, doc, meta in zip(ids, docs, metas)]
 
 
 def count() -> int:

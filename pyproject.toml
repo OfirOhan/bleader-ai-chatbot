@@ -1,0 +1,38 @@
+[project]
+name = "autosage"
+version = "0.1.0"
+description = "AutoSage — a grounded, retrieval-augmented car-advice chatbot"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    # Web API
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "pydantic>=2.6",
+    # RAG stack
+    "chromadb>=0.5.0",              # local vector database
+    "sentence-transformers>=2.7.0", # all-MiniLM-L6-v2 embedding model
+    "google-genai>=0.3.0",          # Gemini client (chat + Hebrew->English translation)
+    # Ingestion / scraping
+    "requests>=2.31",
+    "trafilatura>=1.9",             # robust main-article extraction
+    "beautifulsoup4>=4.12",         # fallback extractor
+    # Config
+    "python-dotenv>=1.0",
+    "rank-bm25>=0.2.2",
+]
+
+[tool.uv]
+# This repo is run as a set of modules (`python -m backend.ingest`,
+# `uvicorn backend.app:app`) rather than an installed package, so uv only
+# manages the dependency environment — it does not build/install the project.
+package = false
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]   # make `backend` / `eval` importable without installing
+testpaths = ["tests"]

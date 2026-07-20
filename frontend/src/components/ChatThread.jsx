@@ -21,7 +21,7 @@ export default function ChatThread({ messages, thinking }) {
               {msg.role === 'user' ? t('you') : t('assistant.name')}
             </div>
             {msg.role === 'user' ? (
-              <div className="message-bubble">{msg.content}</div>
+              <div className="message-bubble" dir="auto">{msg.content}</div>
             ) : (
               <AnswerCard message={msg} />
             )}

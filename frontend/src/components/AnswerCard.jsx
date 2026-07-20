@@ -16,7 +16,10 @@ export default function AnswerCard({ message }) {
     <div className="answer-card">
       <div className="answer-content">
         {paragraphs.map((p, i) => (
-          <p key={i}>{p}</p>
+          // dir="auto" lets each paragraph pick its own base direction from its
+          // text, so a Hebrew reply renders RTL (with English car names/numbers
+          // ordered correctly) even when the UI chrome is LTR, and vice-versa.
+          <p key={i} dir="auto">{p}</p>
         ))}
       </div>
 

@@ -102,7 +102,8 @@ autosage/
 │   └── app.py          # FastAPI endpoints
 ├── frontend/           # React + Vite chat UI
 ├── docs/EXAMPLE.md     # a sample interaction
-├── requirements.txt
+├── pyproject.toml      # deps + project metadata (uv)
+├── uv.lock             # pinned, reproducible dependency versions
 └── .env.example
 ```
 
@@ -110,26 +111,29 @@ autosage/
 
 ## Quickstart
 
-**Prereqs:** Python 3.10+, Node 18+, and a Gemini API key
+**Prereqs:** [uv](https://docs.astral.sh/uv/), Node 18+, and a Gemini API key
 ([aistudio.google.com/apikey](https://aistudio.google.com/apikey)).
+uv installs Python 3.10+ for you if you don't have it.
 
 ```bash
 # 1. Backend deps + key
-python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+uv sync                         # creates .venv and installs from the lockfile
 cp .env.example .env            # then paste your GEMINI_API_KEY into .env
 
 # 2. Build the knowledge base (fetches the 8 articles, ~1–2 min the first time)
-python -m backend.ingest
+uv run python -m backend.ingest
 
 # 3. Run the API (http://127.0.0.1:8000)
-uvicorn backend.app:app --reload
+uv run uvicorn backend.app:app --reload
 
 # 4. Run the UI (separate terminal → http://localhost:5173)
 cd frontend
 npm install
 npm run dev
 ```
+
+> `uv run <cmd>` runs a command inside the project environment (no manual
+> `activate` needed). Prefer it over `pip`/`python` directly.
 
 Open http://localhost:5173, sign in with any email, and start asking about cars.
 

@@ -37,7 +37,12 @@ def run(refresh: bool = False) -> None:
         vectors = embeddings.embed(english)
 
         ids = [f"{art.slug}-{i}" for i in range(len(chunks))]
-        metas = [{"car": art.name, "url": art.url, "lang": "he"} for _ in chunks]
+        # Keep the English translation alongside the Hebrew document: the lexical
+        # (BM25) index and the cross-encoder reranker both operate in English.
+        metas = [
+            {"car": art.name, "url": art.url, "lang": "he", "text_en": en}
+            for en in english
+        ]
         store.add(ids=ids, documents=chunks, embeddings=vectors, metadatas=metas)
 
         total += len(chunks)
@@ -47,6 +52,13 @@ def run(refresh: bool = False) -> None:
 
 
 def main() -> None:
+    # Windows consoles default to cp1252 and crash on the ✓ progress glyphs;
+    # force UTF-8 so ingest output is portable.
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except (AttributeError, ValueError):
+        pass
+
     ap = argparse.ArgumentParser(description="Ingest car road-test articles.")
     ap.add_argument("--refresh", action="store_true",
                     help="re-download articles instead of using the cache")

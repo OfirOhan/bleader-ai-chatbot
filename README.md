@@ -7,6 +7,10 @@ holds a natural conversation whose answers are **grounded in the retrieved
 reviews** (not hallucinated) — while gradually inferring what the user is looking
 for.
 
+**▶ [Watch the demo](demo/demo.mp4)** — a short walkthrough: a grounded comparison
+with citations, a context-aware follow-up, an out-of-scope refusal, preference
+inference, and a reply in Hebrew.
+
 ---
 
 ## What it does
@@ -34,7 +38,8 @@ flowchart LR
 
 ```mermaid
 flowchart TB
-    Q[user question] --> R
+    Q[user question] --> P[analyze — one JSON call<br/>rewrite search query · prefs · reply language]
+    P --> R
 
     subgraph R [hybrid retrieval]
         direction LR
@@ -45,7 +50,7 @@ flowchart TB
 
     R --> G[grounded answer<br/>Gemini · cited · user's language]
     R -.rerank score.-> Gate[relevance gate] -.weak match?.-> G
-    Q -.one JSON call.-> P[update preferences<br/>+ pick language] --> G
+    P -.prefs · language.-> G
 ```
 
 Stack: **React** UI → **FastAPI** → `rag.py` (ChromaDB · MiniLM · BM25 · cross-encoder · Gemini), with **SQLite** for users, conversations, and per-conversation preferences.
@@ -115,15 +120,22 @@ Two layers, deliberately kept independent:
 Every answer returns the set of source cars/URLs it drew from, rendered as
 clickable citation chips.
 
-### Gradual preference inference (+ language) — one call
+### Turn analysis — preferences, language, and query rewrite in one call
 
-After each user turn, a single JSON-mode Gemini call does two jobs at once:
-updates a running preference profile (`budget`, `body_type`, `powertrain`,
-`usage`, `priorities`, `candidates`) **and** decides the reply language (honoring
-explicit requests like "answer in Hebrew" even when typed in English). Merging
-them — both are extraction over the same message — keeps a chat turn to **two
-Gemini calls** (analyze + answer). The profile is persisted on the conversation
-and fed back into the answer prompt so advice personalizes over time.
+Before retrieval, a single JSON-mode Gemini call does three jobs at once:
+
+1. **Updates the preference profile** (`budget`, `body_type`, `powertrain`,
+   `usage`, `priorities`, `candidates`), persisted on the conversation and fed
+   back into the answer prompt so advice personalizes over time.
+2. **Rewrites the question into a standalone search query**, resolving pronouns
+   from the conversation — so a follow-up like *"which is cheaper?"* becomes
+   *"Genesis GV80 vs Kia EV9 price"* and retrieves the right passages instead of
+   generic ones.
+3. **Picks the reply language** (honoring explicit requests like "answer in
+   Hebrew" even when typed in English).
+
+All three are extraction over the same message + context, so merging them keeps a
+chat turn to **two Gemini calls** (analyze + answer).
 
 ---
 
@@ -132,7 +144,10 @@ and fed back into the answer prompt so advice personalizes over time.
 Two harnesses, both runnable. Retrieval quality needs no LLM judge — it's scored
 against hand-labeled ground truth (which car each question is about).
 
-**Retrieval** (`uv run python -m eval.retrieval_eval`, local & free):
+**Retrieval** (`uv run python -m eval.retrieval_eval`, local & free) — the run also
+writes the metrics and this chart to [`eval/results/`](eval/results):
+
+![Retrieval on the hard set: dense 0.29 → hybrid 0.57 → rerank 1.00](eval/results/retrieval_metrics.png)
 
 | Retriever | hit@1 (hard set) | MRR (hard set) |
 |-----------|:---:|:---:|
@@ -149,8 +164,11 @@ stage does exactly its job. The gate also cleanly separates in-scope questions
 **Faithfulness** (`uv run python -m eval.faithfulness_eval`, judged by a **local
 Qwen** via Ollama — independent of the generator, zero API cost):
 
-- In-scope groundedness **4.13 / 5**, hallucination **~0%** (the one flag was a
-  judge error, verified against source), out-of-scope correctly declined **4/4**.
+- In-scope groundedness **4.13 / 5**, hallucination **0%** (nothing fabricated
+  across the in-scope answers), out-of-scope correctly declined **4/4**. The
+  points below 5 are answers that *declined* a paraphrased fact they had actually
+  retrieved (the passage-level-recall limitation noted below) — precision over
+  recall, not invention.
 
 Unit + retrieval-behavior tests: `uv run pytest` (6 tests, no API needed).
 
@@ -190,21 +208,22 @@ autosage/
 
 ## Quickstart
 
-### Option A — Docker (one command to run it)
+### Option A — Docker (one command)
 
 **Prereqs:** Docker + a Gemini API key.
 
 ```bash
 echo "GEMINI_API_KEY=your-key" >> .env
-docker compose build
-docker compose run --rm backend python -m backend.ingest   # build the KB, once
-docker compose up
+docker compose up --build
 ```
 
 Open **http://localhost:5173**, sign in with any email, and start asking about cars.
-ChromaDB, chat history, and the downloaded model weights live in named volumes, so
-ingest only runs once and survives restarts. Ingest is a separate step (not part of
-`up`) so the Gemini API calls happen when *you* choose, not on every boot.
+
+On the **first** boot the backend builds the knowledge base automatically (fetches
++ ingests the 8 articles — a minute or two), then serves. ChromaDB, chat history,
+and model weights persist in named volumes, so every boot after that skips ingest
+and starts instantly. Tear down with `docker compose down` (add `-v` to also wipe
+the KB).
 
 ### Option B — Local (uv + Node)
 
@@ -271,6 +290,11 @@ a production frontend build, and a build of both Docker images.
 - **A larger eval set / a stronger judge** — the labeled set is small (≈19 Qs) and
   the local 7B judge is imperfect (it gave the odd inconsistent verdict, which I
   cross-checked by hand). Enough to *measure and compare*; not a benchmark.
+- **RAGAS (or a similar eval framework)** — it would standardize the faithfulness
+  metrics and runs fine on the same local Qwen. For a corpus this size I preferred
+  a small, transparent harness: the retrieval metrics are scored against labels and
+  need no judge at all, and the faithfulness judge is a few readable lines rather
+  than framework indirection. RAGAS is the natural step up once the eval set grows.
 
 ### Known limitations
 
@@ -291,4 +315,5 @@ a production frontend build, and a build of both Docker images.
 - **A larger labeled set and a stronger judge**, to turn the eval from a
   comparison tool into a real benchmark.
 
-See **[docs/EXAMPLE.md](docs/EXAMPLE.md)** for a sample conversation.
+See the **[demo video](demo/demo.mp4)**, or **[docs/EXAMPLE.md](docs/EXAMPLE.md)**
+for the same walkthrough as a written transcript.

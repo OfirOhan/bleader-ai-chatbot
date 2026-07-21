@@ -11,7 +11,9 @@ answer() ties everything together for one user turn:
 """
 from __future__ import annotations
 
-from . import config, embeddings, lexical, llm, rerank, store, translate
+import re
+
+from . import config, corpus, embeddings, lexical, llm, rerank, store, translate
 
 # --- Prompts -----------------------------------------------------------------
 
@@ -26,11 +28,12 @@ Rules:
 - Ground every claim in the provided excerpts. Do not add specs, prices, history
   or comparisons from outside them, even for cars you happen to know well.
 - If the excerpts do not answer the question — including when the user asks about
-  a car you have no review for — say so plainly instead of guessing, and point to
-  what you can help with. You may still relay what an excerpt says about another
-  car it mentions, as long as you attribute it to that review rather than
-  presenting it as your own knowledge of that car.
-- Only offer to compare or recommend cars you actually have reviews for.
+  a car you have no review for — say so plainly *first*, instead of guessing, and
+  point to the cars you do cover (use the CATALOG below, which is your full list —
+  not just the cars in the current excerpts). You may then briefly relay what an
+  excerpt says about another car it mentions, as long as you attribute it to that
+  review rather than presenting it as your own knowledge of that car.
+- Only offer to compare or recommend cars from your CATALOG.
 - Write your ENTIRE reply in the language named in REPLY LANGUAGE below. The
   excerpts are in Hebrew, but that must NOT change your reply language — follow
   REPLY LANGUAGE, not the language of the excerpts.
@@ -45,13 +48,20 @@ Rules:
 """
 
 TURN_SYSTEM = """\
-You analyze a car shopper's newest message. Return ONLY a JSON object with two
-keys:
+You analyze a car shopper's newest message in an ongoing conversation. Return
+ONLY a JSON object with three keys:
 
 "reply_language": the language AutoSage should answer in — either "English" or
   "Hebrew". Honor an explicit request ("answer in Hebrew", "ענה באנגלית") even if
   the message itself is written in a different language; otherwise use the
   language the user wrote in.
+
+"search_query": a self-contained English search query for a car-review database,
+  capturing what the user wants retrieved *now*. Resolve pronouns and implicit
+  references from the conversation — e.g. if they were discussing the Genesis
+  GV80 and Kia EV9 and now ask "which is cheaper?", return "Genesis GV80 vs Kia
+  EV9 price". If the message already names its subject, just translate it to
+  English. Keywords over grammar; keep it short.
 
 "preferences": an updated copy of the running preference profile. Keep prior
   values unless the new message changes them; add newly revealed ones. Use only
@@ -74,14 +84,21 @@ def _script_language(text: str) -> str:
     return "English"
 
 
-def analyze_turn(profile: dict, user_message: str) -> tuple[dict, str]:
-    """Update the preference profile and choose the reply language in one call.
+def analyze_turn(profile: dict, history: list[dict], user_message: str) -> tuple[dict, str, str]:
+    """Update prefs, choose the reply language, and rewrite the retrieval query —
+    all in one Gemini call.
 
-    Merging these (both are JSON extraction over the same message) saves a Gemini
-    round-trip per turn. Falls back to script detection for the language and to
-    the previous profile if the model returns anything unexpected.
+    Merging these (all three are extraction over the same message + context) keeps
+    a turn to two Gemini calls total. Falls back to script detection for the
+    language, the previous profile, and the raw message as the query if the model
+    returns anything unexpected.
     """
+    convo = "\n".join(
+        f"{m['role'].upper()}: {m['content']}"
+        for m in history[-config.MAX_HISTORY_TURNS:]
+    )
     payload = (
+        f"Conversation so far:\n{convo or '(none)'}\n\n"
         f"Current preference profile:\n{profile}\n\n"
         f"User's newest message:\n{user_message}"
     )
@@ -97,7 +114,9 @@ def analyze_turn(profile: dict, user_message: str) -> tuple[dict, str]:
 
     prefs = data.get("preferences")
     new_profile = prefs if isinstance(prefs, dict) else profile
-    return new_profile, language
+
+    search_query = str(data.get("search_query", "")).strip()
+    return new_profile, language, search_query
 
 
 # --- Retrieval: hybrid (dense + BM25) -> RRF -> cross-encoder rerank ----------
@@ -120,16 +139,14 @@ def _rrf(rankings: list[list[dict]], k_rrf: int = config.RRF_K) -> list[dict]:
     return [hit_by_id[hid] for hid in ordered]
 
 
-def retrieve(question: str, k: int = config.TOP_K) -> tuple[list[dict], float]:
-    """Hybrid retrieval for one question.
+def retrieve(query_en: str, k: int = config.TOP_K) -> tuple[list[dict], float]:
+    """Hybrid retrieval for one already-English query.
 
     Returns (top-k reranked hits, confidence) where confidence is the best
     cross-encoder relevance score — a much sharper "does the KB actually cover
     this?" signal than cosine, which is fooled when a review merely mentions an
     outside car.
     """
-    query_en = translate.translate_query(question)
-
     dense = store.search(embeddings.embed_one(query_en), config.CANDIDATES)
     sparse = lexical.search(query_en, config.CANDIDATES)
 
@@ -155,6 +172,55 @@ def _sources(hits: list[dict]) -> list[dict]:
     return out
 
 
+def _catalog() -> str:
+    """The full list of cars we have reviews for (static, not retrieval-derived)."""
+    return ", ".join(a.name for a in corpus.ARTICLES)
+
+
+# Words in a car's display name that don't identify it (years, trim descriptors).
+_CAR_STOPWORDS = {"co", "and", "facelift", "manual", "long", "term", "report"}
+
+
+def _car_tokens(car: str) -> list[str]:
+    """Distinctive lowercase tokens for a car, e.g. 'Audi RS3 (facelift)' ->
+    ['audi', 'rs3']. Model codes (RS3/GV80/EV9) stay Latin even inside a Hebrew
+    reply, so they give a reliable cross-language 'was this car named?' test."""
+    base = re.sub(r"\(.*?\)", "", car)  # drop the parenthetical
+    toks = []
+    for t in re.findall(r"[A-Za-z0-9]+", base):
+        tl = t.lower()
+        if len(t) < 2 or tl in _CAR_STOPWORDS:
+            continue
+        if t.isdigit() and 1900 <= int(t) <= 2100:  # a model year, not an id
+            continue
+        toks.append(tl)
+    return toks
+
+
+def _mentions(car: str, text_low: str) -> bool:
+    return any(tok in text_low for tok in _car_tokens(car))
+
+
+def _cited_sources(hits: list[dict], answer_text: str) -> list[dict]:
+    """Cite the retrieved cars the answer actually discusses.
+
+    Two guards keep this honest: (1) only cars that were *retrieved* can be cited,
+    and (2) segments that enumerate the whole catalog — e.g. the "here's what I do
+    cover" line in a refusal — are ignored, so listing cars never counts as citing
+    them. Falls back to all retrieved sources if nothing matches, so an answer is
+    never left uncited.
+    """
+    catalog = [a.name for a in corpus.ARTICLES]
+    segments = re.split(r"(?<=[.!?\n])\s+", answer_text)
+    body = " ".join(
+        seg for seg in segments
+        if sum(_mentions(c, seg.lower()) for c in catalog) < 3  # skip enumerations
+    ).lower()
+    srcs = _sources(hits)
+    cited = [s for s in srcs if _mentions(s["car"], body)]
+    return cited or srcs
+
+
 def _prefs_line(profile: dict) -> str:
     if not profile:
         return "No preferences inferred yet."
@@ -178,8 +244,9 @@ def answer(question: str, history: list[dict], profile: dict) -> dict:
     profile: the running preference dict for this conversation.
     Returns {content, sources, preferences}.
     """
-    hits, confidence = retrieve(question)
-    new_profile, language = analyze_turn(profile, question)
+    new_profile, language, search_query = analyze_turn(profile, history, question)
+    query_en = search_query or translate.translate_query(question)
+    hits, confidence = retrieve(query_en)
 
     convo = "\n".join(
         f"{m['role'].upper()}: {m['content']}"
@@ -196,6 +263,7 @@ def answer(question: str, history: list[dict], profile: dict) -> dict:
     user_payload = (
         f"REPLY LANGUAGE: {language}\n\n"
         f"{match_note}"
+        f"CATALOG — the cars you have reviews for: {_catalog()}\n\n"
         f"KNOWN USER PREFERENCES: {_prefs_line(new_profile)}\n\n"
         f"CONVERSATION SO FAR:\n{convo or '(none)'}\n\n"
         f"REVIEW EXCERPTS (your only source of truth):\n{_format_context(hits)}\n\n"
@@ -205,6 +273,6 @@ def answer(question: str, history: list[dict], profile: dict) -> dict:
 
     return {
         "content": content,
-        "sources": _sources(hits),
+        "sources": _cited_sources(hits, content),
         "preferences": new_profile,
     }

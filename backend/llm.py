@@ -59,26 +59,69 @@ def generate_json(system: str, user: str, *, temperature: float = 0.0) -> dict:
         return {}
 
 
-def translate_he_to_en(texts: list[str]) -> list[str]:
-    """Translate a batch of Hebrew strings to English in one call.
+def translate_query_to_en(text: str) -> str:
+    """Faithfully translate one short user query to English for retrieval.
 
-    Returns the translations in the same order. Falls back to the originals if
-    the model returns an unexpected shape (so ingest never hard-fails on a
-    translation hiccup — retrieval just degrades gracefully to Hebrew text).
+    Distinct from translate_he_to_en (which translates document passages): a
+    query may already be English and may contain instructions like "answer in
+    Hebrew" — it must be *translated verbatim*, never answered or elaborated.
+    Reusing the passage translator here caused it to hallucinate a spec sheet
+    instead of translating, which broke retrieval.
+    """
+    system = (
+        "You translate a short car-shopping search query into English. Output "
+        "ONLY the translated query text — never answer it, never add facts or "
+        "descriptions, never explain. If it is already English, return it "
+        "unchanged. Preserve car names, model codes, numbers and units exactly."
+    )
+    return generate_text(system, text, temperature=0.0).strip()
+
+
+_TRANSLATE_SYSTEM = (
+    "You are a professional automotive translator. Translate each numbered "
+    "Hebrew passage to natural English, preserving car names, numbers, units "
+    "and technical terms. Return a JSON object mapping the string index to "
+    'its English translation, e.g. {"0": "...", "1": "..."}. Indices only, '
+    "no extra keys."
+)
+
+
+def translate_he_to_en(texts: list[str], *, batch_size: int = 8) -> list[str]:
+    """Translate Hebrew passages to English, in small retried batches.
+
+    Small batches keep each JSON response well under the output-token limit — a
+    large batch could be truncated into invalid JSON, which silently fell back to
+    untranslated Hebrew and broke retrieval for a whole article. Missing indices
+    are retried (with a little temperature to escape a deterministic bad parse);
+    anything still missing falls back to the original, and the caller declines to
+    cache such fallbacks so a later run can heal them.
     """
     if not texts:
         return []
-    numbered = "\n".join(f"[{i}] {t}" for i, t in enumerate(texts))
-    system = (
-        "You are a professional automotive translator. Translate each numbered "
-        "Hebrew passage to natural English, preserving car names, numbers, units "
-        "and technical terms. Return a JSON object mapping the string index to "
-        'its English translation, e.g. {"0": "...", "1": "..."}. Indices only, '
-        "no extra keys."
-    )
-    data = generate_json(system, numbered)
     out: list[str] = []
-    for i, original in enumerate(texts):
-        val = data.get(str(i))
-        out.append(val if isinstance(val, str) and val.strip() else original)
+    for start in range(0, len(texts), batch_size):
+        out.extend(_translate_group(texts[start:start + batch_size]))
     return out
+
+
+def _translate_group(texts: list[str]) -> list[str]:
+    result: list[str | None] = [None] * len(texts)
+    pending = list(range(len(texts)))
+    for attempt in range(3):
+        if not pending:
+            break
+        numbered = "\n".join(f"[{i}] {texts[i]}" for i in pending)
+        data = generate_json(
+            _TRANSLATE_SYSTEM, numbered, temperature=0.0 if attempt == 0 else 0.4
+        )
+        still: list[int] = []
+        for i in pending:
+            val = data.get(str(i))
+            if isinstance(val, str) and val.strip():
+                result[i] = val.strip()
+            else:
+                still.append(i)
+        pending = still
+    for i in pending:  # retries exhausted — keep original (heals on next ingest)
+        result[i] = texts[i]
+    return result  # type: ignore[return-value]

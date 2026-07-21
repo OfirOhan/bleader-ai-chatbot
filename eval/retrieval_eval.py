@@ -14,8 +14,13 @@ Questions are English (the retriever's space), so no translation call is made.
 """
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from backend import config, embeddings, lexical, rag, rerank, store
 from eval.dataset import all_cases, in_scope_cases
+
+RESULTS_DIR = Path(__file__).resolve().parent / "results"
 
 
 def _car_ranking(hits: list[dict]) -> list[str]:
@@ -68,15 +73,18 @@ def run() -> None:
             g["hybrid"].append((_car_ranking(fused), c["expected"]))
             g["rerank"].append((_car_ranking(reranked), c["expected"]))
 
+    results: dict[str, dict[str, dict]] = {}
     for group, title in [("named", "Easy: question names the car"),
                          ("feature", "Hard: car found from a feature/spec only")]:
         n = len(rk[group]["dense"])
+        results[group] = {"n": n, "metrics": {}}
         print(f"\n{title}  (n={n})")
         print(f"{'retriever':<22}{'hit@1':>8}{'hit@3':>8}{'MRR':>8}")
         for key, label in [("dense", "dense (vector only)"),
                            ("hybrid", "hybrid (dense+BM25)"),
                            ("rerank", "hybrid + rerank")]:
             m = _metrics(rk[group][key])
+            results[group]["metrics"][key] = m
             print(f"{label:<22}{m['hit@1']:>8.2f}{m['hit@3']:>8.2f}{m['MRR']:>8.2f}")
 
     # Gate: in-scope should clear the floor; out-of-scope should fall below it.
@@ -92,6 +100,68 @@ def run() -> None:
         print(f"  ! slipped through ({v:+.2f}): {c['q']}")
     for c in fn:
         print(f"  ! in-scope wrongly flagged: {c['q']}")
+
+    results["gate"] = {
+        "floor": floor,
+        "in_scope_kept": [len(tp), len(tp) + len(fn)],
+        "out_of_scope_flagged": [len(tn), len(tn) + len(fp)],
+    }
+    _save(results)
+    _plot(results)
+
+
+def _save(results: dict) -> None:
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    path = RESULTS_DIR / "retrieval_metrics.json"
+    path.write_text(json.dumps(results, indent=2), encoding="utf-8")
+    print(f"\nSaved metrics -> {path.relative_to(RESULTS_DIR.parent.parent)}")
+
+
+def _plot(results: dict) -> None:
+    """Render the hard-set progression (dense -> hybrid -> rerank) as a bar chart.
+
+    The 'feature' group is the discriminating one — where naming the car doesn't
+    give the answer away — so that's the story worth showing.
+    """
+    try:
+        import matplotlib
+        matplotlib.use("Agg")  # headless: write a file, never open a window
+        import matplotlib.pyplot as plt
+    except ImportError:
+        print("(matplotlib not installed — skipping chart; `uv sync --dev` to enable)")
+        return
+
+    metrics = results["feature"]["metrics"]
+    stages = [("dense", "dense\n(vector only)"),
+              ("hybrid", "+ BM25\n(hybrid, RRF)"),
+              ("rerank", "+ cross-encoder\nrerank")]
+    labels = [lbl for _, lbl in stages]
+    hit1 = [metrics[k]["hit@1"] for k, _ in stages]
+    mrr = [metrics[k]["MRR"] for k, _ in stages]
+
+    x = range(len(stages))
+    width = 0.38
+    fig, ax = plt.subplots(figsize=(7.2, 4.2))
+    b1 = ax.bar([i - width / 2 for i in x], hit1, width, label="hit@1",
+                color="#4C6FFF")
+    b2 = ax.bar([i + width / 2 for i in x], mrr, width, label="MRR",
+                color="#12B981")
+
+    ax.set_ylim(0, 1.08)
+    ax.set_ylabel("score")
+    ax.set_title(f"Retrieval on the hard set  (car not named, n={results['feature']['n']})")
+    ax.set_xticks(list(x))
+    ax.set_xticklabels(labels, fontsize=9)
+    ax.legend(frameon=False, loc="upper left")
+    ax.spines[["top", "right"]].set_visible(False)
+    ax.bar_label(b1, fmt="%.2f", padding=3, fontsize=9)
+    ax.bar_label(b2, fmt="%.2f", padding=3, fontsize=9)
+    fig.tight_layout()
+
+    path = RESULTS_DIR / "retrieval_metrics.png"
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+    print(f"Saved chart   -> {path.relative_to(RESULTS_DIR.parent.parent)}")
 
 
 if __name__ == "__main__":

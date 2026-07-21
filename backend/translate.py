@@ -37,19 +37,39 @@ def _key(text: str) -> str:
 
 
 def translate_batch(texts: list[str]) -> list[str]:
-    """Translate many strings, filling and persisting the cache for misses."""
+    """Translate many strings, persisting only successful translations.
+
+    A translation that came back unchanged (== source) is a failed fallback —
+    we return it for this run but do NOT cache it, so re-running ingest retries it
+    instead of permanently serving untranslated Hebrew.
+    """
     cache = _load_cache()
+    fresh: dict[str, str] = {}
     missing = [t for t in texts if _key(t) not in cache]
     if missing:
-        # De-dupe before the API call.
-        uniq = list(dict.fromkeys(missing))
+        uniq = list(dict.fromkeys(missing))  # de-dupe before the API call
         translated = llm.translate_he_to_en(uniq)
+        changed = False
         for src, dst in zip(uniq, translated):
-            cache[_key(src)] = dst
-        _save_cache()
-    return [cache[_key(t)] for t in texts]
+            fresh[src] = dst
+            if dst and dst != src:           # only persist real translations
+                cache[_key(src)] = dst
+                changed = True
+        if changed:
+            _save_cache()
+    return [cache.get(_key(t)) or fresh.get(t) or t for t in texts]
 
 
 def translate_query(text: str) -> str:
-    """Translate one user query (cached like everything else)."""
-    return translate_batch([text])[0]
+    """Translate one user query to English for retrieval (cached).
+
+    Uses the dedicated query translator, not the passage translator — a query
+    must be translated faithfully, not elaborated. Cache keys are namespaced
+    ("q:") so a query never collides with a same-text document chunk.
+    """
+    cache = _load_cache()
+    key = "q:" + _key(text)
+    if key not in cache:
+        cache[key] = llm.translate_query_to_en(text)
+        _save_cache()
+    return cache[key]

@@ -44,6 +44,7 @@ torch = { index = "pytorch-cpu" }
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",
+    "matplotlib>=3.8",   # renders the retrieval-eval results chart
 ]
 
 [tool.pytest.ini_options]

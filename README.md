@@ -7,9 +7,13 @@ holds a natural conversation whose answers are **grounded in the retrieved
 reviews** (not hallucinated) — while gradually inferring what the user is looking
 for.
 
-**▶ [Watch the demo](demo/demo.mp4)** — a short walkthrough: a grounded comparison
-with citations, a context-aware follow-up, an out-of-scope refusal, preference
-inference, and a reply in Hebrew.
+### Demo
+
+<video src="https://github.com/OfirOhan/bleader-ai-chatbot/raw/master/demo/demo.mp4" controls muted width="720"></video>
+
+A short walkthrough: a grounded comparison with citations, a context-aware
+follow-up, an out-of-scope refusal, preference inference, and a reply in Hebrew.
+*(If the player doesn't load, [download the clip](demo/demo.mp4).)*
 
 ---
 

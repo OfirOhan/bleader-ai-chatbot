@@ -9,11 +9,11 @@ for.
 
 ### Demo
 
-[![AutoSage demo — grounded comparison with citations](demo/demo-poster.jpg)](demo/demo.mp4)
+[![AutoSage demo — grounded comparison with citations](demo/demo-poster.jpg)](https://github.com/OfirOhan/bleader-ai-chatbot/raw/master/demo/demo.mp4)
 
-**▶ [Watch the walkthrough](demo/demo.mp4)** — a grounded comparison with citations,
-a context-aware follow-up, an out-of-scope refusal, preference inference, and a
-reply in Hebrew.
+**▶ [Watch the walkthrough](https://github.com/OfirOhan/bleader-ai-chatbot/raw/master/demo/demo.mp4)**
+— a grounded comparison with citations, a context-aware follow-up, an out-of-scope
+refusal, preference inference, and a reply in Hebrew.
 
 ---
 

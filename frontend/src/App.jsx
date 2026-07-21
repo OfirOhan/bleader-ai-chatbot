@@ -1,9 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import AuthPage from './components/AuthPage.jsx';
 import Sidebar from './components/Sidebar.jsx';
 import ChatThread from './components/ChatThread.jsx';
 import MessageInput from './components/MessageInput.jsx';
-import PreferencesBar from './components/PreferencesBar.jsx';
 import Logo from './components/Logo.jsx';
 import { useI18n } from './i18n/index.jsx';
 import * as api from './api.js';
@@ -14,8 +13,10 @@ export default function App() {
   const [conversations, setConversations] = useState([]);
   const [activeConvId, setActiveConvId] = useState(null);
   const [messages, setMessages] = useState([]);
-  const [preferences, setPreferences] = useState(null);
   const [sending, setSending] = useState(false);
+  // Set when we create a conversation inside handleSend, so the effect below
+  // does NOT fetch its (mid-generation) messages and race the optimistic update.
+  const skipNextLoad = useRef(false);
 
   // Load conversations on sign-in.
   useEffect(() => {
@@ -25,12 +26,13 @@ export default function App() {
   // Load messages when the active conversation changes.
   useEffect(() => {
     if (activeConvId) {
+      if (skipNextLoad.current) {
+        skipNextLoad.current = false;  // handleSend owns this conversation's messages
+        return;
+      }
       api.getMessages(activeConvId).then(setMessages).catch(console.error);
-      const conv = conversations.find((c) => c.id === activeConvId);
-      setPreferences(conv?.preferences || null);
     } else {
       setMessages([]);
-      setPreferences(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeConvId]);
@@ -48,13 +50,11 @@ export default function App() {
     setConversations([]);
     setActiveConvId(null);
     setMessages([]);
-    setPreferences(null);
   };
 
   const handleNewChat = () => {
     setActiveConvId(null);
     setMessages([]);
-    setPreferences(null);
   };
 
   const handleSelectConv = async (convId) => {
@@ -81,6 +81,7 @@ export default function App() {
         const conv = await api.createConversation();
         setConversations((prev) => [conv, ...prev]);
         convId = conv.id;
+        skipNextLoad.current = true;   // don't let the load-effect race this send
         setActiveConvId(convId);
       } catch (e) {
         console.error('Failed to create conversation:', e);
@@ -99,12 +100,11 @@ export default function App() {
         result.user_message,
         result.assistant_message,
       ]);
-      if (result.preferences) setPreferences(result.preferences);
       setConversations((prev) =>
         prev.map((c) =>
           c.id === convId
             ? { ...c, title: c.title || result.conversation_title || content.slice(0, 60),
-                last_message_preview: content, preferences: result.preferences }
+                last_message_preview: content }
             : c
         )
       );
@@ -139,7 +139,6 @@ export default function App() {
           </div>
         ) : (
           <>
-            <PreferencesBar preferences={preferences} />
             <ChatThread messages={messages} thinking={sending} />
             <MessageInput onSend={handleSend} disabled={sending} />
           </>

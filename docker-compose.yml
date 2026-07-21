@@ -1,0 +1,39 @@
+# AutoSage — full stack in two containers:
+#   frontend (nginx: static bundle + /api proxy)  ->  backend (FastAPI + RAG)
+#
+# First run:
+#   1. echo "GEMINI_API_KEY=your-key" >> .env
+#   2. docker compose build
+#   3. docker compose run --rm backend python -m backend.ingest   # build the KB (once)
+#   4. docker compose up
+#   -> open http://localhost:5173
+#
+# The KB (ChromaDB), chat history (SQLite) and downloaded model weights live in
+# named volumes, so they survive restarts and ingest only runs once.
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    environment:
+      GEMINI_API_KEY: ${GEMINI_API_KEY:?put GEMINI_API_KEY in your .env file}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.1-flash-lite}
+    volumes:
+      - autosage-data:/data   # ChromaDB + SQLite
+      - hf-cache:/models      # MiniLM + cross-encoder weights (downloaded once)
+    ports:
+      - "8000:8000"           # optional: hit the API / Swagger docs directly
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.frontend
+    depends_on:
+      - backend
+    ports:
+      - "5173:80"
+
+volumes:
+  autosage-data:
+  hf-cache:

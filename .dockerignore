@@ -1,0 +1,21 @@
+# Keep the build context small and free of secrets / local state.
+.git
+.gitignore
+.venv
+**/__pycache__
+*.py[cod]
+.pytest_cache
+.idea
+.vscode
+
+# Regenerated inside the container / mounted as volumes — never bake in.
+backend/data
+backend/autosage.db
+.env
+
+# Frontend build inputs we don't want in the context (npm ci rebuilds these).
+frontend/node_modules
+frontend/dist
+
+# Docs aren't needed to build/run.
+docs

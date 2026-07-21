@@ -11,6 +11,8 @@ dependencies = [
     "pydantic>=2.6",
     # RAG stack
     "chromadb>=0.5.0",              # local vector database
+    "torch>=2.2",                   # CPU-only build (see [tool.uv.sources] below) — the
+                                    # models are tiny, so we never want the multi-GB CUDA stack
     "sentence-transformers>=2.7.0", # all-MiniLM-L6-v2 embedding model
     "google-genai>=0.3.0",          # Gemini client (chat + Hebrew->English translation)
     # Ingestion / scraping
@@ -27,6 +29,17 @@ dependencies = [
 # `uvicorn backend.app:app`) rather than an installed package, so uv only
 # manages the dependency environment — it does not build/install the project.
 package = false
+
+# Pull torch from PyTorch's CPU-only index. The default PyPI wheel bundles the
+# whole NVIDIA CUDA stack (multiple GB) that we never use — these models are
+# tiny and run on CPU. This keeps the Docker image ~2-3 GB instead of ~17 GB.
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
 
 [dependency-groups]
 dev = [

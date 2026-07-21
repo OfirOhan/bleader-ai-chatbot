@@ -13,14 +13,17 @@ from dotenv import load_dotenv
 load_dotenv()  # read .env if present
 
 # --- Paths -------------------------------------------------------------------
+# DATA_DIR / DB_PATH honor env overrides so a container can point all mutable
+# state (ChromaDB + SQLite) at a single mounted volume. Unset -> the original
+# in-repo locations, so local dev is unchanged.
 BACKEND_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = BACKEND_DIR.parent
-DATA_DIR = BACKEND_DIR / "data"
+DATA_DIR = Path(os.getenv("AUTOSAGE_DATA_DIR") or BACKEND_DIR / "data")
 RAW_DIR = DATA_DIR / "raw"          # cached source HTML
 CLEAN_DIR = DATA_DIR / "clean"      # extracted article text
 CHROMA_DIR = DATA_DIR / "chroma"    # persistent vector store
 TRANSLATION_CACHE = DATA_DIR / "translations.json"
-DB_PATH = BACKEND_DIR / "autosage.db"
+DB_PATH = Path(os.getenv("AUTOSAGE_DB_PATH") or BACKEND_DIR / "autosage.db")
 
 for _d in (DATA_DIR, RAW_DIR, CLEAN_DIR, CHROMA_DIR):
     _d.mkdir(parents=True, exist_ok=True)

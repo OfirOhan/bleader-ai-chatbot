@@ -1905,7 +1905,7 @@ body {
 }
 /* ============================================================
    AutoSage additions — grounded answer card, source citations,
-   inferred-preference chips, typing indicator.
+   typing indicator.
    ============================================================ */
 
 .answer-card {
@@ -1959,37 +1959,6 @@ body {
 }
 .source-chip:hover { background: var(--color-surface-hover); }
 .source-chip::before { content: "↗"; font-size: 11px; opacity: 0.7; }
-
-/* Inferred preferences bar (the "gradually infer preferences" feature made visible) */
-.pref-bar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--color-border);
-  background: var(--color-surface-1);
-}
-.pref-bar-label {
-  font-size: var(--text-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-muted);
-  margin-inline-end: 4px;
-}
-.pref-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: var(--color-surface-2);
-  border: 1px solid var(--color-border);
-  color: var(--text-secondary);
-  font-size: var(--text-xs);
-  font-weight: 500;
-}
-.pref-chip b { color: var(--text-primary); font-weight: 600; }
 
 /* Typing indicator while the assistant is thinking */
 .typing {
